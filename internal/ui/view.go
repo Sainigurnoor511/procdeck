@@ -279,7 +279,14 @@ func (m Model) inputBox(w int) string {
 	switch {
 	case m.mode == modeConfirm:
 		border, fg = colAmber, colAmber
-		content = "▲ " + m.prompt + "   y / n"
+		// the answer keys must survive truncation, so the prompt yields to them
+		const glyph, answer = "▲ ", "   y / n"
+		budget := inner - 1 - runewidth.StringWidth(glyph) - runewidth.StringWidth(answer)
+		prompt := "…"
+		if budget > 0 {
+			prompt = truncate(m.prompt, budget)
+		}
+		content = glyph + prompt + answer
 	case m.mode == modeFilter:
 		border = colAccent
 		content = "> " + m.filter + "▌"

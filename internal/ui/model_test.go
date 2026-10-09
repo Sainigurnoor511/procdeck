@@ -161,6 +161,29 @@ func TestConfirmPromptInInputBox(t *testing.T) {
 			t.Errorf("%dx%d: view does not describe %q", size[0], size[1], want)
 		}
 	}
+
+	// a real-world-length prompt must still show the answer keys
+	m := loaded(t)
+	m.mode, m.prompt = modeConfirm, "End python: app.scheduler_service · closeloop-backend (2 processes)?"
+	for _, w := range []int{60, 80, 120} {
+		box := m.inputBox(w)
+		if !strings.Contains(box, "y / n") {
+			t.Errorf("w=%d: a long prompt hid the answer keys: %q", w, box)
+		}
+		if got := lipgloss.Width(box); got != w {
+			t.Errorf("w=%d: width = %d", w, got)
+		}
+	}
+	// widths too narrow for the prompt at all must degrade, not panic
+	for _, w := range []int{11, 14} {
+		box := m.inputBox(w)
+		if got := lipgloss.Width(box); got != w {
+			t.Errorf("w=%d: width = %d", w, got)
+		}
+		if got := lipgloss.Height(box); got != 3 {
+			t.Errorf("w=%d: height = %d", w, got)
+		}
+	}
 }
 
 func TestHyperlinkSurvivesSelection(t *testing.T) {
