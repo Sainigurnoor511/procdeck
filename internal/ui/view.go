@@ -51,8 +51,9 @@ func (m Model) showDetail() bool { return m.height >= detailCutoff }
 func (m Model) showHint() bool   { return m.height >= hintCutoff }
 func (m Model) showStatus() bool { return m.height >= statusCutoff }
 
-// chrome counts every line View renders apart from the table's data rows.
-func (m Model) chrome() int {
+// baseChrome counts every line View renders apart from the table's data rows
+// and the suggestion rows.
+func (m Model) baseChrome() int {
 	n := 1 + tableChrome + inputLines // header + table frame + input box
 	if m.showDetail() {
 		n += detailLines
@@ -64,6 +65,36 @@ func (m Model) chrome() int {
 		n++
 	}
 	return n
+}
+
+// suggestionRows is how many lines the command suggestions occupy. Bubble Tea
+// v1 has no compositor, so the list is reserved rows in the normal layout flow
+// rather than a floating overlay: every row it takes is a row the table gives
+// up.
+//
+// It is computed from baseChrome, never from tableRows, because tableRows
+// subtracts this; and it is clamped to leave one line behind so the table
+// always keeps at least one row.
+func (m Model) suggestionRows() int {
+	if !m.suggestOpen() {
+		return 0
+	}
+	n := len(matchCommands(m.cmdInput))
+	if n > maxSuggestions {
+		n = maxSuggestions
+	}
+	if room := m.height - m.baseChrome() - 1; n > room {
+		n = room
+	}
+	if n < 0 {
+		n = 0
+	}
+	return n
+}
+
+// chrome counts every line View renders apart from the table's data rows.
+func (m Model) chrome() int {
+	return m.baseChrome() + m.suggestionRows()
 }
 
 func (m Model) tableRows() int {
@@ -128,6 +159,7 @@ func (m Model) View() string {
 	if m.showStatus() {
 		out = append(out, m.statusLine(w))
 	}
+	out = append(out, m.suggestionLines(w)...)
 	out = append(out, strings.Split(m.inputBox(w), "\n")...)
 	if m.showHint() {
 		out = append(out, m.keys(w))
@@ -285,12 +317,15 @@ func (m Model) inputBox(w int) string {
 			prompt = truncate(m.prompt, budget)
 		}
 		content = glyph + prompt + answer
+	case m.mode == modeCommand:
+		border = th.Accent
+		content = "> /" + m.cmdInput + "▌"
 	case m.mode == modeFilter:
 		border = th.Accent
 		content = "> " + m.filter + "▌"
 	case m.filter == "":
 		fg = th.Dim
-		content = "> press / to filter"
+		content = "> press / for commands, f to filter"
 	}
 	// Width is the content width, so the rendered block is inner+2 == w columns.
 	return lipgloss.NewStyle().
@@ -301,11 +336,16 @@ func (m Model) inputBox(w int) string {
 		Render(fit(content, inner))
 }
 
+// keys is the footer hint line. The pairs come from keymap in table order, so
+// the footer and /help can never drift apart, and the table is ordered so the
+// bindings that matter most survive the narrowest widths.
 func (m Model) keys(w int) string {
 	st := m.styles()
-	pairs := [][2]string{
-		{"↑↓", "move"}, {"/", "filter"}, {"x", "end"}, {"r", "restart"},
-		{"q", "quit"}, {"D", "dups"}, {"o", "open"}, {"c", "copy"}, {"a", "all"},
+	var pairs [][2]string
+	for _, b := range keymap {
+		if b.hint[0] != "" {
+			pairs = append(pairs, b.hint)
+		}
 	}
 	var b strings.Builder
 	used := 0

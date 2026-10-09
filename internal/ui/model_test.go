@@ -46,6 +46,22 @@ func press(m Model, keys ...string) Model {
 			msg = tea.KeyMsg{Type: tea.KeyEsc}
 		case "down":
 			msg = tea.KeyMsg{Type: tea.KeyDown}
+		case "up":
+			msg = tea.KeyMsg{Type: tea.KeyUp}
+		case "tab":
+			msg = tea.KeyMsg{Type: tea.KeyTab}
+		case "backspace":
+			msg = tea.KeyMsg{Type: tea.KeyBackspace}
+		case "space":
+			msg = tea.KeyMsg{Type: tea.KeySpace}
+		case "pgup":
+			msg = tea.KeyMsg{Type: tea.KeyPgUp}
+		case "pgdown":
+			msg = tea.KeyMsg{Type: tea.KeyPgDown}
+		case "home":
+			msg = tea.KeyMsg{Type: tea.KeyHome}
+		case "end":
+			msg = tea.KeyMsg{Type: tea.KeyEnd}
 		case "ctrl+c":
 			msg = tea.KeyMsg{Type: tea.KeyCtrlC}
 		default:
@@ -58,7 +74,7 @@ func press(m Model, keys ...string) Model {
 }
 
 func TestFilterNarrowsAndEscClears(t *testing.T) {
-	m := press(loaded(t), "/", "c", "e", "l", "enter")
+	m := press(loaded(t), "f", "c", "e", "l", "enter")
 	if len(m.visible) != 2 || m.mode != modeList {
 		t.Fatalf("visible = %d, mode = %d", len(m.visible), m.mode)
 	}
@@ -66,7 +82,7 @@ func TestFilterNarrowsAndEscClears(t *testing.T) {
 	if len(m.visible) != 3 {
 		t.Errorf("esc did not clear the filter: %d visible", len(m.visible))
 	}
-	if m = press(loaded(t), "/", "8", "0", "0", "0"); len(m.visible) != 1 {
+	if m = press(loaded(t), "f", "8", "0", "0", "0"); len(m.visible) != 1 {
 		t.Errorf("port filter matched %d", len(m.visible))
 	}
 }
@@ -234,13 +250,27 @@ func TestConfigSavedMsgDoesNotCrashTheModel(t *testing.T) {
 func TestViewLinesFitWidth(t *testing.T) {
 	for _, size := range [][2]int{{60, 8}, {60, 10}, {60, 12}, {80, 24}, {120, 40}, {200, 50}} {
 		next, _ := loaded(t).Update(tea.WindowSizeMsg{Width: size[0], Height: size[1]})
-		lines := strings.Split(next.(Model).View(), "\n")
-		if len(lines) != size[1] {
-			t.Errorf("%dx%d: %d lines", size[0], size[1], len(lines))
+		base := next.(Model)
+		// the suggestion rows are reserved in the layout budget, so command
+		// mode has to hold the exact-height contract on its own
+		states := map[string]Model{
+			"list":         base,
+			"cmd-empty":    press(base, "/"),
+			"cmd-matching": press(base, "/", "e", "n"),
+			"cmd-args":     press(base, "/", "e", "n", "d", "space", "c", "e", "l"),
 		}
-		for i, l := range lines {
-			if w := lipgloss.Width(l); w > size[0] {
-				t.Errorf("%dx%d: line %d is %d wide", size[0], size[1], i, w)
+		for name, m := range states {
+			lines := strings.Split(m.View(), "\n")
+			if len(lines) != size[1] {
+				t.Errorf("%s at %dx%d: %d lines", name, size[0], size[1], len(lines))
+			}
+			for i, l := range lines {
+				if w := lipgloss.Width(l); w > size[0] {
+					t.Errorf("%s at %dx%d: line %d is %d wide", name, size[0], size[1], i, w)
+				}
+			}
+			if rows := m.tableRows(); rows < 1 {
+				t.Errorf("%s at %dx%d: tableRows = %d", name, size[0], size[1], rows)
 			}
 		}
 	}
@@ -249,9 +279,12 @@ func TestViewLinesFitWidth(t *testing.T) {
 func TestInputBoxGeometry(t *testing.T) {
 	states := map[string]Model{
 		"idle":      loaded(t),
-		"filtered":  press(loaded(t), "/", "c", "e", "l", "enter"),
-		"filtering": press(loaded(t), "/", "c", "e", "l"),
+		"filtered":  press(loaded(t), "f", "c", "e", "l", "enter"),
+		"filtering": press(loaded(t), "f", "c", "e", "l"),
 		"confirm":   press(loaded(t), "x"),
+		"command":   press(loaded(t), "/"),
+		"cmd-typed": press(loaded(t), "/", "t", "h"),
+		"cmd-args":  press(loaded(t), "/", "f", "i", "l", "t", "e", "r", "space"),
 	}
 	for name, m := range states {
 		for _, w := range []int{60, 80, 120} {
@@ -370,7 +403,7 @@ func TestSpinnerDoesNotRescan(t *testing.T) {
 }
 
 func TestCtrlCClearsThenExits(t *testing.T) {
-	m := press(loaded(t), "/", "c", "e", "l", "ctrl+c")
+	m := press(loaded(t), "f", "c", "e", "l", "ctrl+c")
 	if m.mode != modeList || m.filter != "" || len(m.visible) != 3 {
 		t.Fatalf("mode=%d filter=%q visible=%d", m.mode, m.filter, len(m.visible))
 	}

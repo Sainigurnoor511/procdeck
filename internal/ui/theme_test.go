@@ -77,9 +77,11 @@ func frames(m Model) string {
 			m    Model
 		}{
 			{"idle", base},
-			{"filtering", press(base, "/", "c", "e", "l")},
-			{"filtered", press(base, "/", "c", "e", "l", "enter")},
+			{"filtering", press(base, "f", "c", "e", "l")},
+			{"filtered", press(base, "f", "c", "e", "l", "enter")},
 			{"confirm", press(base, "x")},
+			{"command", press(base, "/")},
+			{"command-suggest", press(base, "/", "t", "h")},
 			{"all", press(base, "a")},
 			{"moved", press(base, "down", "down")},
 			{"busy", withBusy(base)},

@@ -32,6 +32,9 @@ const (
 	modeList mode = iota
 	modeFilter
 	modeConfirm
+	// modeCommand is the / input with its suggestion rows. New modes are
+	// appended so the existing values never shift.
+	modeCommand
 )
 
 type statusKind int
@@ -92,6 +95,11 @@ type Model struct {
 	mode    mode
 	prompt  string
 	pending tea.Cmd
+
+	// cmdInput is the text typed after the /; cmdSel is the highlighted
+	// suggestion.
+	cmdInput string
+	cmdSel   int
 
 	busy     string
 	busyAt   time.Time
@@ -198,6 +206,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateFilter(msg)
 		case modeConfirm:
 			return m.updateConfirm(msg)
+		case modeCommand:
+			return m.updateCommand(msg)
 		}
 		return m.updateList(msg)
 	}
@@ -223,6 +233,11 @@ func (m Model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "end", "G":
 		m.move(len(m.visible))
 	case "/":
+		// / is the command input, the way Claude Code reads it; the filter
+		// moved to f, which was unbound
+		m.mode, m.cmdInput, m.cmdSel = modeCommand, "", 0
+		m.clampScroll()
+	case "f":
 		m.mode = modeFilter
 	case "esc":
 		m.filter = ""
@@ -353,6 +368,7 @@ func (m Model) interrupt() (tea.Model, tea.Cmd) {
 	}
 	m.lastCtrlC = now
 	m.mode, m.prompt, m.pending = modeList, "", nil
+	m.cmdInput, m.cmdSel = "", 0
 	if m.filter != "" {
 		m.filter = ""
 		m.rebuild()
