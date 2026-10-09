@@ -16,6 +16,12 @@ type Theme struct {
 	Amber  lipgloss.AdaptiveColor
 	Red    lipgloss.AdaptiveColor
 	SelBg  lipgloss.AdaptiveColor
+
+	// DupBold is the DupBold contingency the themes review pre-decided: when a
+	// palette has no hue to spare, the duplicate row carries weight as well as
+	// lightness. Only mono sets it, and only because re-spreading its ramp to
+	// free Red from Accent cost the Text/Amber gap most of its brightness.
+	DupBold bool
 }
 
 // styles is the derived set every render method works from. Rebuilding it per
@@ -138,27 +144,35 @@ var themeOrder = []Theme{
 		SelBg:  lipgloss.AdaptiveColor{Dark: "#313244", Light: "#E6E9EF"},
 	},
 	// mono: grayscale, no accent hue, so lightness carries everything colour
-	// normally would. The ramp runs dim → running → text → duplicate → danger,
-	// which puts the duplicate row BRIGHTER than an ordinary row: a duplicate
-	// is something to notice, and a grey row next to grey rows is not. Running
-	// sits just under the row text so a healthy service reads as unremarkable.
+	// normally would. The ramp runs dim → running → text → duplicate → danger
+	// → accent, which puts the duplicate row BRIGHTER than an ordinary row: a
+	// duplicate is something to notice, and a grey row next to grey rows is
+	// not. Running sits just under the row text so a healthy service reads as
+	// unremarkable, and danger stops short of accent so the two stay apart.
 	//
-	// Lightness is never the only channel: row() already draws ● running,
+	// The whole ramp was re-spread so Red is no longer the same value as
+	// Accent. Six values now share one lightness axis, so the gaps are tighter
+	// than before: measured with go-colorful against a 0.08 Lab floor, the
+	// worst tested pair is 0.100. Every value stays ≥4.5:1 on the terminal
+	// background and ≥3.37:1 against the selected row.
+	//
+	// The light half's Text/Amber gap is only 0.058 — below the floor the
+	// semantic triple is held to — which is exactly why DupBold is set here:
+	// weight now carries the duplicate distinction that brightness gave up.
+	// Lightness was never the only channel anyway: row() draws ● running,
 	// ▲ duplicate and ○ restricted, the duplicate's name carries a literal
-	// "(duplicate)" suffix, and the duplicate warnings are bold. The measured
-	// Lab separations are 0.17 running/duplicate, 0.12 duplicate/danger and
-	// 0.29 running/danger, all comfortably clear of the 0.08 floor
-	// TestSemanticColorsAreDistinct enforces.
+	// "(duplicate)" suffix, and the duplicate warnings are bold.
 	{
-		Name:   "mono",
-		Accent: lipgloss.AdaptiveColor{Dark: "#FFFFFF", Light: "#000000"},
-		Text:   lipgloss.AdaptiveColor{Dark: "#BDBDBD", Light: "#424242"},
-		Dim:    lipgloss.AdaptiveColor{Dark: "#8A8A8A", Light: "#757575"},
-		Border: lipgloss.AdaptiveColor{Dark: "#4A4A4A", Light: "#BEBEBE"},
-		Green:  lipgloss.AdaptiveColor{Dark: "#ADADAD", Light: "#525252"},
-		Amber:  lipgloss.AdaptiveColor{Dark: "#DDDDDD", Light: "#222222"},
-		Red:    lipgloss.AdaptiveColor{Dark: "#FFFFFF", Light: "#000000"},
-		SelBg:  lipgloss.AdaptiveColor{Dark: "#2A2A2A", Light: "#E8E8E8"},
+		Name:    "mono",
+		Accent:  lipgloss.AdaptiveColor{Dark: "#FFFFFF", Light: "#000000"},
+		Text:    lipgloss.AdaptiveColor{Dark: "#ABABAB", Light: "#454545"},
+		Dim:     lipgloss.AdaptiveColor{Dark: "#757575", Light: "#707070"},
+		Border:  lipgloss.AdaptiveColor{Dark: "#4A4A4A", Light: "#BEBEBE"},
+		Green:   lipgloss.AdaptiveColor{Dark: "#8F8F8F", Light: "#525252"},
+		Amber:   lipgloss.AdaptiveColor{Dark: "#C6C6C6", Light: "#383838"},
+		Red:     lipgloss.AdaptiveColor{Dark: "#E2E2E2", Light: "#1C1C1C"},
+		SelBg:   lipgloss.AdaptiveColor{Dark: "#242424", Light: "#E8E8E8"},
+		DupBold: true,
 	},
 }
 

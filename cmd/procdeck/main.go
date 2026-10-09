@@ -43,21 +43,23 @@ func main() {
 	}
 }
 
-// startModel builds the TUI model with its theme resolved. An explicit -theme
-// is a one-off override for this run and does not overwrite the preference
-// t / T saved; an unknown name is rejected rather than quietly ignored.
+// startModel builds the TUI model with its remembered settings resolved. An
+// explicit -theme is a one-off override for this run and does not overwrite
+// the preference t / T saved; an unknown name is rejected rather than quietly
+// ignored. The scan interval always comes from the config, so an overridden
+// theme does not cost the user their interval.
 func startModel(theme string) ui.Model {
 	model := ui.New(scan.New())
-	if theme != "" {
-		if !ui.ThemeExists(theme) {
-			fmt.Fprintf(os.Stderr, "procdeck: unknown theme %q\nvalid themes: %s\n",
-				theme, strings.Join(ui.ThemeNames(), ", "))
-			os.Exit(1)
-		}
-		return model.WithTheme(theme)
+	if theme != "" && !ui.ThemeExists(theme) {
+		fmt.Fprintf(os.Stderr, "procdeck: unknown theme %q\nvalid themes: %s\n",
+			theme, strings.Join(ui.ThemeNames(), ", "))
+		os.Exit(1)
 	}
-	name, warning := ui.LoadTheme()
-	model = model.WithTheme(name)
+	name, seconds, warning := ui.LoadConfig()
+	if theme != "" {
+		name, warning = theme, ""
+	}
+	model = model.WithTheme(name).WithRefreshSeconds(seconds)
 	if warning != "" {
 		model = model.WithWarning(warning)
 	}

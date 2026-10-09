@@ -190,10 +190,16 @@ func palette(th Theme) map[string]lipgloss.AdaptiveColor {
 }
 
 // TestSemanticColorsAreDistinct guards against an accidental near-duplicate in
-// the running / duplicate / danger triple. It is a separation floor, not a
-// WCAG contrast claim.
+// the running / duplicate / danger triple and against any of the three
+// collapsing onto Accent, which is what mono's Red used to do. It is a
+// separation floor, not a WCAG contrast claim.
 func TestSemanticColorsAreDistinct(t *testing.T) {
 	const floor = 0.08
+	// mono gives up brightness between Text and Amber to free Red from
+	// Accent, so the duplicate row must keep the weight channel instead
+	if th, ok := themeByName("mono"); !ok || !th.DupBold {
+		t.Errorf("mono DupBold = %v (found = %v), want true", th.DupBold, ok)
+	}
 	for _, th := range themeOrder {
 		for _, half := range []string{"Dark", "Light"} {
 			pick := func(c lipgloss.AdaptiveColor) colorful.Color {
@@ -207,7 +213,7 @@ func TestSemanticColorsAreDistinct(t *testing.T) {
 				}
 				return parsed
 			}
-			green, amber, red := pick(th.Green), pick(th.Amber), pick(th.Red)
+			green, amber, red, accent := pick(th.Green), pick(th.Amber), pick(th.Red), pick(th.Accent)
 			for _, pair := range []struct {
 				name string
 				a, b colorful.Color
@@ -215,11 +221,15 @@ func TestSemanticColorsAreDistinct(t *testing.T) {
 				{"green/amber", green, amber},
 				{"amber/red", amber, red},
 				{"green/red", green, red},
+				{"green/accent", green, accent},
+				{"amber/accent", amber, accent},
+				{"red/accent", red, accent},
 			} {
 				if d := pair.a.DistanceLab(pair.b); d < floor {
-					t.Errorf("%s %s: %s distance %.3f < %.2f\n  green/amber %.3f  amber/red %.3f  green/red %.3f",
+					t.Errorf("%s %s: %s distance %.3f < %.2f\n  green/amber %.3f  amber/red %.3f  green/red %.3f\n  green/accent %.3f  amber/accent %.3f  red/accent %.3f",
 						th.Name, half, pair.name, d, floor,
-						green.DistanceLab(amber), amber.DistanceLab(red), green.DistanceLab(red))
+						green.DistanceLab(amber), amber.DistanceLab(red), green.DistanceLab(red),
+						green.DistanceLab(accent), amber.DistanceLab(accent), red.DistanceLab(accent))
 				}
 			}
 		}

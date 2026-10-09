@@ -15,9 +15,12 @@ import (
 )
 
 const (
-	refreshEvery = 2 * time.Second
-	spinEvery    = 120 * time.Millisecond
-	ctrlCWindow  = 1500 * time.Millisecond
+	defaultRefreshSeconds = 2
+	minRefreshSeconds     = 1
+	maxRefreshSeconds     = 3600
+
+	spinEvery   = 120 * time.Millisecond
+	ctrlCWindow = 1500 * time.Millisecond
 )
 
 // asterisk family, all width-1 in runewidth
@@ -64,6 +67,15 @@ type doneMsg struct {
 // trigger a scan and fork the single refresh chain.
 type themeSavedMsg struct{ err error }
 
+// configSavedMsg reports the result of remembering any other setting. It is a
+// separate type from themeSavedMsg so each failure can name the setting it
+// could not remember, and so the theme tests keep asserting on exactly one
+// message type.
+type configSavedMsg struct {
+	what string
+	err  error
+}
+
 type Model struct {
 	scanner *scan.Scanner
 	snap    scan.Snapshot
@@ -94,7 +106,8 @@ type Model struct {
 	width      int
 	height     int
 
-	theme Theme
+	theme          Theme
+	refreshSeconds int
 }
 
 func New(scanner *scan.Scanner) Model {
@@ -135,7 +148,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.rebuild()
 		}
 		if msg.chained {
-			return m, tea.Tick(refreshEvery, func(time.Time) tea.Msg { return tickMsg{} })
+			return m, tea.Tick(m.refreshInterval(), func(time.Time) tea.Msg { return tickMsg{} })
 		}
 		return m, nil
 
@@ -170,6 +183,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case themeSavedMsg:
 		if msg.err != nil {
 			m.setStatus("could not remember the theme: "+msg.err.Error(), true)
+		}
+		return m, nil
+
+	case configSavedMsg:
+		if msg.err != nil {
+			m.setStatus("could not remember the "+msg.what+": "+msg.err.Error(), true)
 		}
 		return m, nil
 
@@ -249,6 +268,31 @@ func (m Model) cycleTheme(delta int) (tea.Model, tea.Cmd) {
 	return m, saveThemeCmd(m.theme.Name)
 }
 
+// refreshInterval is the scan period, read fresh every time a tick is
+// scheduled. That is what makes the interval changeable without a generation
+// counter: changing it only writes m.refreshSeconds and schedules nothing, so
+// at the moment it changes there is still exactly one timer in flight. That
+// timer fires once at the old interval, and the scan it triggers schedules the
+// next one at the new interval. No new chain is ever started, so there is no
+// orphan to cancel, and nothing new runs while the app is idle.
+//
+// An unset or out-of-range value falls back to the default rather than
+// clamping to a value nobody asked for, so a zero-valued Model still scans.
+func (m Model) refreshInterval() time.Duration {
+	n := m.refreshSeconds
+	if n < minRefreshSeconds || n > maxRefreshSeconds {
+		n = defaultRefreshSeconds
+	}
+	return time.Duration(n) * time.Second
+}
+
+// WithRefreshSeconds applies a remembered scan interval without persisting it.
+// An out-of-range value is left to refreshInterval to default.
+func (m Model) WithRefreshSeconds(seconds int) Model {
+	m.refreshSeconds = seconds
+	return m
+}
+
 // WithTheme applies a named theme without persisting it. An unknown name is
 // ignored: the caller validates with ThemeExists and reports the problem.
 func (m Model) WithTheme(name string) Model {
@@ -323,6 +367,12 @@ func spinCmd() tea.Cmd {
 
 func saveThemeCmd(name string) tea.Cmd {
 	return func() tea.Msg { return themeSavedMsg{err: saveTheme(name)} }
+}
+
+func saveIntervalCmd(seconds int) tea.Cmd {
+	return func() tea.Msg {
+		return configSavedMsg{what: "scan interval", err: saveInterval(seconds)}
+	}
 }
 
 // startBusy returns a frame ticker only when one is not already running, so a

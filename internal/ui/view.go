@@ -184,6 +184,11 @@ func (m Model) row(svc group.Service, c columns, selected bool) string {
 	case svc.Duplicate:
 		base = base.Foreground(th.Amber)
 		dot, glyph = dot.Foreground(th.Amber), "▲"
+		if th.DupBold {
+			// a palette with no hue to spare pays for the duplicate
+			// distinction in weight instead; bold is not a width
+			base, dot = base.Bold(true), dot.Bold(true)
+		}
 	}
 	muted := lipgloss.NewStyle().Foreground(th.Dim)
 	link := lipgloss.NewStyle().Foreground(th.Accent).Underline(true)

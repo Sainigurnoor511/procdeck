@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -105,6 +106,128 @@ func TestSelectionFollowsPid(t *testing.T) {
 	m = next.(Model)
 	if m.cursor != 0 || m.selected != 10 {
 		t.Errorf("cursor=%d selected=%d after list shrank", m.cursor, m.selected)
+	}
+}
+
+func TestRefreshIntervalClamps(t *testing.T) {
+	for _, c := range []struct {
+		seconds int
+		want    time.Duration
+	}{
+		{0, defaultRefreshSeconds * time.Second},
+		{-1, defaultRefreshSeconds * time.Second},
+		{maxRefreshSeconds + 1, defaultRefreshSeconds * time.Second},
+		{minRefreshSeconds, time.Second},
+		{30, 30 * time.Second},
+		{maxRefreshSeconds, maxRefreshSeconds * time.Second},
+	} {
+		m := loaded(t).WithRefreshSeconds(c.seconds)
+		if got := m.refreshInterval(); got != c.want {
+			t.Errorf("refreshSeconds %d: interval %v, want %v", c.seconds, got, c.want)
+		}
+	}
+}
+
+// assertScheduledTick is the single-scan-ticker guard for the refresh chain. A
+// tea.Batch command hands back its BatchMsg immediately and a scan closure
+// returns as soon as the scan finishes, so anything that resolves promptly has
+// forked the chain; a timer is the only thing that stays pending. The message
+// channel is returned because bubbletea's Tick arms its timer when the command
+// is built, so the closure resolves exactly once and must never be called
+// twice.
+func assertScheduledTick(t *testing.T, cmd tea.Cmd) <-chan tea.Msg {
+	t.Helper()
+	if cmd == nil {
+		t.Fatal("a chained scan scheduled no refresh")
+	}
+	got := make(chan tea.Msg, 1)
+	go func() { got <- cmd() }()
+	select {
+	case msg := <-got:
+		t.Fatalf("a chained scan produced an immediate %T — the refresh chain forked", msg)
+	case <-time.After(250 * time.Millisecond):
+	}
+	return got
+}
+
+func TestChainedSnapSchedulesOneTickAtTheSetInterval(t *testing.T) {
+	m := loaded(t).WithRefreshSeconds(1)
+	start := time.Now()
+	next, cmd := m.Update(snapMsg{snap: m.snap, chained: true})
+	if next.(Model).refreshSeconds != 1 {
+		t.Fatalf("refreshSeconds = %d, want 1", next.(Model).refreshSeconds)
+	}
+	got := assertScheduledTick(t, cmd)
+	// and the one pending command really is a tick at the interval that was set
+	select {
+	case msg := <-got:
+		if _, ok := msg.(tickMsg); !ok {
+			t.Fatalf("the scheduled command produced %T, want tickMsg", msg)
+		}
+		if elapsed := time.Since(start); elapsed < 900*time.Millisecond {
+			t.Errorf("the tick fired after %v, want about 1s", elapsed)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("the scheduled tick never fired")
+	}
+}
+
+// TestChangingRefreshSecondsDoesNotForkTheChain is the mechanism from
+// refreshInterval's comment: a new interval is read at schedule time, so each
+// chained scan still schedules exactly one timer and no second chain starts.
+func TestChangingRefreshSecondsDoesNotForkTheChain(t *testing.T) {
+	m := loaded(t).WithRefreshSeconds(1)
+	next, cmd := m.Update(snapMsg{snap: m.snap, chained: true})
+	assertScheduledTick(t, cmd)
+
+	m = next.(Model).WithRefreshSeconds(5)
+	next, cmd = m.Update(snapMsg{snap: m.snap, chained: true})
+	assertScheduledTick(t, cmd)
+	if got := next.(Model).refreshInterval(); got != 5*time.Second {
+		t.Errorf("interval = %v, want 5s", got)
+	}
+
+	// a one-off refresh still schedules nothing at all
+	if _, cmd := next.(Model).Update(snapMsg{snap: m.snap}); cmd != nil {
+		t.Error("an unchained scan scheduled a tick")
+	}
+}
+
+func TestTickMsgYieldsOneSnap(t *testing.T) {
+	m := loaded(t)
+	m.scanner = scan.New()
+	next, cmd := m.Update(tickMsg{})
+	if cmd == nil {
+		t.Fatal("a tick produced no scan")
+	}
+	msg, ok := cmd().(snapMsg)
+	if !ok {
+		t.Fatalf("a tick produced %T, want snapMsg", cmd())
+	}
+	if !msg.chained {
+		t.Error("the tick's scan was not chained, so the refresh chain ends here")
+	}
+	if next.(Model).status != m.status {
+		t.Errorf("a tick changed the status to %q", next.(Model).status)
+	}
+}
+
+func TestConfigSavedMsgDoesNotCrashTheModel(t *testing.T) {
+	next, cmd := loaded(t).Update(configSavedMsg{what: "scan interval"})
+	if cmd != nil {
+		t.Error("a successful config write produced a follow-up cmd")
+	}
+	if s := next.(Model).status; s != "" {
+		t.Errorf("a successful config write set the status to %q", s)
+	}
+
+	next, cmd = loaded(t).Update(configSavedMsg{what: "scan interval", err: os.ErrPermission})
+	after := next.(Model)
+	if cmd != nil {
+		t.Error("a failed config write produced a follow-up cmd")
+	}
+	if after.statusKind != statusError || !strings.Contains(after.status, "could not remember the scan interval") {
+		t.Errorf("status = %q kind = %d", after.status, after.statusKind)
 	}
 }
 

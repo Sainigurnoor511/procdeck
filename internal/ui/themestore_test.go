@@ -169,6 +169,84 @@ func TestThemeStoreSaveFailureIsNotFatal(t *testing.T) {
 	}
 }
 
+func TestConfigIntervalRoundTrips(t *testing.T) {
+	configHome(t)
+	if err := saveInterval(7); err != nil {
+		t.Fatalf("saveInterval: %v", err)
+	}
+	name, seconds, warning := LoadConfig()
+	if name != defaultThemeName || seconds != 7 || warning != "" {
+		t.Errorf("round trip gave (%q, %d, %q), want (%q, 7, \"\")",
+			name, seconds, warning, defaultThemeName)
+	}
+}
+
+// TestConfigKeysDoNotClobberEachOther is the read-modify-write guarantee: each
+// writer touches only its own key.
+func TestConfigKeysDoNotClobberEachOther(t *testing.T) {
+	configHome(t)
+	if err := saveInterval(11); err != nil {
+		t.Fatalf("saveInterval: %v", err)
+	}
+	if err := saveTheme("mono"); err != nil {
+		t.Fatalf("saveTheme: %v", err)
+	}
+	if name, seconds, _ := LoadConfig(); name != "mono" || seconds != 11 {
+		t.Errorf("after saving a theme: (%q, %d), want (\"mono\", 11)", name, seconds)
+	}
+	if err := saveInterval(13); err != nil {
+		t.Fatalf("second saveInterval: %v", err)
+	}
+	if name, seconds, _ := LoadConfig(); name != "mono" || seconds != 13 {
+		t.Errorf("after saving an interval: (%q, %d), want (\"mono\", 13)", name, seconds)
+	}
+}
+
+func TestConfigOutOfRangeIntervalFallsBack(t *testing.T) {
+	for _, bad := range []string{"0", "-5", "99999"} {
+		t.Run(bad, func(t *testing.T) {
+			configHome(t)
+			path := writeConfig(t, `{"theme":"nord","refreshIntervalSeconds":`+bad+`}`)
+			name, seconds, warning := LoadConfig()
+			if seconds != defaultRefreshSeconds {
+				t.Errorf("seconds = %d, want the default %d", seconds, defaultRefreshSeconds)
+			}
+			if !strings.Contains(warning, path) || !strings.Contains(warning, bad) {
+				t.Errorf("warning does not name the file and the value: %q", warning)
+			}
+			// the bad interval must not cost the user their theme
+			if name != "nord" {
+				t.Errorf("theme = %q, want nord", name)
+			}
+		})
+	}
+}
+
+func TestConfigUnknownKeyWarnsAndStillLoads(t *testing.T) {
+	configHome(t)
+	path := writeConfig(t, `{"theme":"nord","refreshIntervalSeconds":9,"wibble":true}`)
+	name, seconds, warning := LoadConfig()
+	if name != "nord" || seconds != 9 {
+		t.Errorf("got (%q, %d), want (\"nord\", 9)", name, seconds)
+	}
+	if !strings.Contains(warning, "wibble") || !strings.Contains(warning, path) {
+		t.Errorf("warning = %q, want it to name the unknown key and the file", warning)
+	}
+}
+
+func TestConfigEmptyFileIsUsable(t *testing.T) {
+	configHome(t)
+	path := writeConfig(t, "")
+	name, seconds, warning := LoadConfig()
+	if name != defaultThemeName || seconds != defaultRefreshSeconds {
+		t.Errorf("got (%q, %d), want the defaults (%q, %d)",
+			name, seconds, defaultThemeName, defaultRefreshSeconds)
+	}
+	if !strings.Contains(warning, path) {
+		t.Errorf("warning does not name the file: %q", warning)
+	}
+}
+
 // TestThemeSavedMsgDoesNotCrashTheModel covers the degrade-to-memory path: the
 // switch stays applied and the failure only shows as a status line.
 func TestThemeSavedMsgDoesNotCrashTheModel(t *testing.T) {
