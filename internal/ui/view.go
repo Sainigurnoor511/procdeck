@@ -13,25 +13,28 @@ import (
 )
 
 var (
-	colAccent = lipgloss.Color("#8B7CF6")
-	colGreen  = lipgloss.Color("#3DD68C")
-	colAmber  = lipgloss.Color("#F5A524")
-	colRed    = lipgloss.Color("#F3506B")
-	colDim    = lipgloss.Color("#6B7280")
-	colText   = lipgloss.Color("#E5E7EB")
-	colLink   = lipgloss.Color("#60A5FA")
-	colSelBg  = lipgloss.Color("#2B2E43")
+	colAccent = lipgloss.AdaptiveColor{Dark: "#D97757", Light: "#B2552F"}
+	colText   = lipgloss.AdaptiveColor{Dark: "#E8E4DF", Light: "#1C1A17"}
+	colDim    = lipgloss.AdaptiveColor{Dark: "#8A827A", Light: "#6B635B"}
+	colBorder = lipgloss.AdaptiveColor{Dark: "#45403A", Light: "#D6CFC7"}
+	colGreen  = lipgloss.AdaptiveColor{Dark: "#7FA86A", Light: "#3F6B2E"}
+	colAmber  = lipgloss.AdaptiveColor{Dark: "#D3A05A", Light: "#8A5E14"}
+	colRed    = lipgloss.AdaptiveColor{Dark: "#C96A62", Light: "#A3362E"}
+	colSelBg  = lipgloss.AdaptiveColor{Dark: "#2E2A26", Light: "#EFE8E0"}
 
-	styleTitle  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FFFFFF")).Background(colAccent).Padding(0, 1)
-	styleBorder = lipgloss.NewStyle().Foreground(lipgloss.Color("#3F4455"))
-	styleHead   = lipgloss.NewStyle().Bold(true).Foreground(colDim)
-	styleDim    = lipgloss.NewStyle().Foreground(colDim)
-	styleText   = lipgloss.NewStyle().Foreground(colText)
-	styleKey    = lipgloss.NewStyle().Bold(true).Foreground(colAccent)
-	styleLabel  = lipgloss.NewStyle().Foreground(colAccent)
-	styleOK     = lipgloss.NewStyle().Foreground(colGreen)
-	styleWarn   = lipgloss.NewStyle().Foreground(colAmber).Bold(true)
-	styleErr    = lipgloss.NewStyle().Foreground(colRed)
+	styleTitle   = lipgloss.NewStyle().Bold(true).Foreground(colAccent)
+	styleBorder  = lipgloss.NewStyle().Foreground(colBorder)
+	styleHead    = lipgloss.NewStyle().Bold(true).Foreground(colDim)
+	styleDim     = lipgloss.NewStyle().Foreground(colDim)
+	styleText    = lipgloss.NewStyle().Foreground(colText)
+	styleHintKey = lipgloss.NewStyle().Bold(true).Foreground(colDim)
+	styleLabel   = lipgloss.NewStyle().Foreground(colAccent)
+	styleOK      = lipgloss.NewStyle().Foreground(colGreen)
+	styleWarn    = lipgloss.NewStyle().Foreground(colAmber).Bold(true)
+	styleErr     = lipgloss.NewStyle().Foreground(colRed)
+
+	// every box border rune comes from here, nothing is hand-written
+	rounded = lipgloss.RoundedBorder()
 )
 
 type columns struct {
@@ -40,9 +43,12 @@ type columns struct {
 
 const (
 	minWidth     = 60
-	chromeLines  = 6
 	detailLines  = 6
 	detailCutoff = 18
+	hintCutoff   = 12
+	statusCutoff = 10
+	inputLines   = 3 // rounded border + 1 content line
+	tableChrome  = 3 // top border + head row + bottom border
 )
 
 func (m Model) viewWidth() int {
@@ -53,12 +59,26 @@ func (m Model) viewWidth() int {
 }
 
 func (m Model) showDetail() bool { return m.height >= detailCutoff }
+func (m Model) showHint() bool   { return m.height >= hintCutoff }
+func (m Model) showStatus() bool { return m.height >= statusCutoff }
+
+// chrome counts every line View renders apart from the table's data rows.
+func (m Model) chrome() int {
+	n := 1 + tableChrome + inputLines // header + table frame + input box
+	if m.showDetail() {
+		n += detailLines
+	}
+	if m.showStatus() {
+		n++
+	}
+	if m.showHint() {
+		n++
+	}
+	return n
+}
 
 func (m Model) tableRows() int {
-	rows := m.height - chromeLines
-	if m.showDetail() {
-		rows -= detailLines
-	}
+	rows := m.height - m.chrome()
 	if rows < 1 {
 		rows = 1
 	}
@@ -115,7 +135,13 @@ func (m Model) View() string {
 	if m.showDetail() {
 		out = append(out, m.detail(inner)...)
 	}
-	out = append(out, m.keys(w), m.statusLine(w))
+	if m.showStatus() {
+		out = append(out, m.statusLine(w))
+	}
+	out = append(out, strings.Split(m.inputBox(w), "\n")...)
+	if m.showHint() {
+		out = append(out, m.keys(w))
+	}
 	return strings.Join(out, "\n")
 }
 
@@ -127,7 +153,7 @@ func (m Model) emptyText() string {
 }
 
 func (m Model) header(w int) string {
-	left := styleTitle.Render("procdeck")
+	left := styleTitle.Render(" ✻ procdeck")
 	dups := countDuplicates(m.services)
 	right := styleDim.Render(plural(len(m.services), "service"))
 	if dups > 0 {
@@ -168,7 +194,7 @@ func (m Model) row(svc group.Service, c columns, selected bool) string {
 		dot, glyph = dot.Foreground(colAmber), "▲"
 	}
 	muted := lipgloss.NewStyle().Foreground(colDim)
-	link := lipgloss.NewStyle().Foreground(colLink).Underline(true)
+	link := lipgloss.NewStyle().Foreground(colAccent).Underline(true)
 	if selected {
 		base = base.Background(colSelBg).Bold(true)
 		dot = dot.Background(colSelBg)
@@ -243,32 +269,60 @@ func (m Model) detail(inner int) []string {
 	return box(svc.Name, "", lines, inner)
 }
 
+// inputBox is always rendered: it is the prompt, the filter editor and the
+// confirm prompt in one always-visible slot.
+func (m Model) inputBox(w int) string {
+	inner := w - 2
+	border, fg := colBorder, colText
+	content := "> " + m.filter + "   (esc clears)"
+	switch {
+	case m.mode == modeConfirm:
+		border, fg = colAmber, colAmber
+		content = "▲ " + m.prompt + "   y / n"
+	case m.mode == modeFilter:
+		border = colAccent
+		content = "> " + m.filter + "▌"
+	case m.filter == "":
+		fg = colDim
+		content = "> press / to filter"
+	}
+	// Width is the content width, so the rendered block is inner+2 == w columns.
+	return lipgloss.NewStyle().
+		Border(rounded).
+		BorderForeground(border).
+		Foreground(fg).
+		Width(inner).
+		Render(fit(content, inner))
+}
+
 func (m Model) keys(w int) string {
 	pairs := [][2]string{
-		{"↑↓", "move"}, {"r", "restart"}, {"x", "end"}, {"D", "end duplicates"},
-		{"o", "open link"}, {"c", "copy cmd"}, {"/", "filter"}, {"a", "all"}, {"q", "quit"},
+		{"↑↓", "move"}, {"/", "filter"}, {"x", "end"}, {"r", "restart"},
+		{"q", "quit"}, {"D", "dups"}, {"o", "open"}, {"c", "copy"}, {"a", "all"},
 	}
 	var b strings.Builder
-	used := 1
-	b.WriteString(" ")
-	for _, p := range pairs {
-		need := runewidth.StringWidth(p[0]) + runewidth.StringWidth(p[1]) + 4
+	used := 0
+	for i, p := range pairs {
+		// leading space for the first pair, " · " separator for the rest
+		need := 1 + runewidth.StringWidth(p[0]) + 1 + runewidth.StringWidth(p[1])
+		if i > 0 {
+			need += 2
+		}
 		if used+need > w {
 			break
 		}
-		b.WriteString(styleKey.Render(p[0]) + " " + styleDim.Render(p[1]) + "   ")
+		if i == 0 {
+			b.WriteString(" ")
+		} else {
+			b.WriteString(styleDim.Render(" · "))
+		}
+		b.WriteString(styleHintKey.Render(p[0]) + " " + styleDim.Render(p[1]))
 		used += need
 	}
 	return b.String()
 }
 
 func (m Model) statusLine(w int) string {
-	switch m.mode {
-	case modeConfirm:
-		return styleWarn.Render(fit(" "+m.prompt+"  y / n", w))
-	case modeFilter:
-		return styleKey.Render(" / ") + styleText.Render(fit(m.filter+"▏", w-3))
-	}
 	text := m.status
 	style := styleOK
 	if m.statusErr {
@@ -281,7 +335,7 @@ func (m Model) statusLine(w int) string {
 }
 
 func box(title, foot string, lines []string, inner int) []string {
-	edge := func(left, label, right string) string {
+	edge := func(left, h, label, right string) string {
 		if label != "" {
 			label = " " + truncate(label, inner-4) + " "
 		}
@@ -289,14 +343,14 @@ func box(title, foot string, lines []string, inner int) []string {
 		if fill < 0 {
 			fill = 0
 		}
-		return styleBorder.Render(left+"─") + styleDim.Render(label) + styleBorder.Render(strings.Repeat("─", fill)+right)
+		return styleBorder.Render(left+h) + styleDim.Render(label) + styleBorder.Render(strings.Repeat(h, fill)+right)
 	}
-	side := styleBorder.Render("│")
-	out := []string{edge("╭", title, "╮")}
+	left, right := styleBorder.Render(rounded.Left), styleBorder.Render(rounded.Right)
+	out := []string{edge(rounded.TopLeft, rounded.Top, title, rounded.TopRight)}
 	for _, l := range lines {
-		out = append(out, side+l+side)
+		out = append(out, left+l+right)
 	}
-	return append(out, edge("╰", foot, "╯"))
+	return append(out, edge(rounded.BottomLeft, rounded.Bottom, foot, rounded.BottomRight))
 }
 
 func hyperlink(url, text string) string {

@@ -106,10 +106,10 @@ func TestSelectionFollowsPid(t *testing.T) {
 }
 
 func TestViewLinesFitWidth(t *testing.T) {
-	for _, size := range [][2]int{{60, 12}, {80, 24}, {120, 40}, {200, 50}} {
+	for _, size := range [][2]int{{60, 8}, {60, 10}, {60, 12}, {80, 24}, {120, 40}, {200, 50}} {
 		next, _ := loaded(t).Update(tea.WindowSizeMsg{Width: size[0], Height: size[1]})
 		lines := strings.Split(next.(Model).View(), "\n")
-		if len(lines) > size[1] {
+		if len(lines) != size[1] {
 			t.Errorf("%dx%d: %d lines", size[0], size[1], len(lines))
 		}
 		for i, l := range lines {
@@ -117,5 +117,71 @@ func TestViewLinesFitWidth(t *testing.T) {
 				t.Errorf("%dx%d: line %d is %d wide", size[0], size[1], i, w)
 			}
 		}
+	}
+}
+
+func TestInputBoxGeometry(t *testing.T) {
+	states := map[string]Model{
+		"idle":      loaded(t),
+		"filtered":  press(loaded(t), "/", "c", "e", "l", "enter"),
+		"filtering": press(loaded(t), "/", "c", "e", "l"),
+		"confirm":   press(loaded(t), "x"),
+	}
+	for name, m := range states {
+		for _, w := range []int{60, 80, 120} {
+			box := m.inputBox(w)
+			if got := lipgloss.Width(box); got != w {
+				t.Errorf("%s at w=%d: width = %d", name, w, got)
+			}
+			if got := lipgloss.Height(box); got != 3 {
+				t.Errorf("%s at w=%d: height = %d", name, w, got)
+			}
+		}
+	}
+}
+
+func TestConfirmPromptInInputBox(t *testing.T) {
+	want := ""
+	if svc, ok := loaded(t).current(); ok {
+		want = describe(svc)
+	}
+	if want == "" {
+		t.Fatal("no selected service")
+	}
+	for _, size := range [][2]int{{60, 9}, {80, 24}} {
+		next, _ := loaded(t).Update(tea.WindowSizeMsg{Width: size[0], Height: size[1]})
+		view := press(next.(Model), "x").View()
+		if !strings.Contains(view, "y / n") {
+			t.Errorf("%dx%d: no confirm prompt in view", size[0], size[1])
+		}
+		if !strings.Contains(view, want) {
+			t.Errorf("%dx%d: view does not describe %q", size[0], size[1], want)
+		}
+	}
+}
+
+func TestHyperlinkSurvivesSelection(t *testing.T) {
+	// inner is 118 at this width, so layout() allocates the link column
+	next, _ := loaded(t).Update(tea.WindowSizeMsg{Width: 120, Height: 24})
+	// move onto the uvicorn row so the linked row is also the selected one
+	m := press(next.(Model), "down", "down")
+	if svc, _ := m.current(); svc.Link != "http://localhost:8000" {
+		t.Fatalf("selected service link = %q", svc.Link)
+	}
+	view := m.View()
+
+	const open = "\x1b]8;;http://localhost:8000\x1b\\"
+	const term = "\x1b]8;;\x1b\\"
+	i := strings.Index(view, open)
+	if i < 0 {
+		t.Fatal("opening OSC 8 sequence is missing")
+	}
+	rest := view[i+len(open):]
+	j := strings.Index(rest, term)
+	if j < 0 {
+		t.Fatal("OSC 8 terminator is missing")
+	}
+	if text := rest[:j]; strings.Contains(text, "\x1b]") || strings.Contains(text, "\n") {
+		t.Errorf("link text is broken up: %q", text)
 	}
 }
