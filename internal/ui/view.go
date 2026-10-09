@@ -28,6 +28,7 @@ var (
 	styleDim     = lipgloss.NewStyle().Foreground(colDim)
 	styleText    = lipgloss.NewStyle().Foreground(colText)
 	styleHintKey = lipgloss.NewStyle().Bold(true).Foreground(colDim)
+	styleAccent  = lipgloss.NewStyle().Foreground(colAccent)
 	styleLabel   = lipgloss.NewStyle().Foreground(colAccent)
 	styleOK      = lipgloss.NewStyle().Foreground(colGreen)
 	styleWarn    = lipgloss.NewStyle().Foreground(colAmber).Bold(true)
@@ -112,7 +113,7 @@ func (m Model) View() string {
 	limit := m.tableRows()
 	switch {
 	case !m.loaded:
-		rows = append(rows, styleDim.Render(fit("  scanning…", inner)))
+		rows = append(rows, padTo(" "+m.busyLine(), inner))
 	case len(m.visible) == 0:
 		rows = append(rows, styleDim.Render(fit("  "+m.emptyText(), inner)))
 	}
@@ -322,11 +323,25 @@ func (m Model) keys(w int) string {
 	return b.String()
 }
 
+// busyLine is the spinner: one accent frame glyph plus a dim label and the
+// seconds the work has been running for.
+func (m Model) busyLine() string {
+	glyph := spinFrames[m.frame%len(spinFrames)]
+	rest := fmt.Sprintf(" %s… (%ds)", m.busy, int(m.busyFor.Seconds()))
+	return styleAccent.Render(glyph) + styleDim.Render(rest)
+}
+
 func (m Model) statusLine(w int) string {
+	if m.busy != "" && m.loaded {
+		return padTo(" "+m.busyLine(), w)
+	}
 	text := m.status
 	style := styleOK
-	if m.statusErr {
+	switch m.statusKind {
+	case statusError:
 		style = styleErr
+	case statusHint:
+		style = styleDim
 	}
 	if text == "" && m.filter != "" {
 		text, style = "filter: "+m.filter+"  (esc clears)", styleDim
@@ -373,6 +388,15 @@ func fit(s string, w int) string {
 	}
 	s = truncate(s, w-1)
 	return s + strings.Repeat(" ", w-runewidth.StringWidth(s))
+}
+
+// padTo pads an already-styled string to w columns. fit cannot be used here:
+// runewidth would count the ANSI escapes, lipgloss.Width does not.
+func padTo(s string, w int) string {
+	if n := w - lipgloss.Width(s); n > 0 {
+		return s + strings.Repeat(" ", n)
+	}
+	return s
 }
 
 func fitRight(s string, w int) string {

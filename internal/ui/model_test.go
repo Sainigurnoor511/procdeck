@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -44,6 +45,8 @@ func press(m Model, keys ...string) Model {
 			msg = tea.KeyMsg{Type: tea.KeyEsc}
 		case "down":
 			msg = tea.KeyMsg{Type: tea.KeyDown}
+		case "ctrl+c":
+			msg = tea.KeyMsg{Type: tea.KeyCtrlC}
 		default:
 			msg = tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(k)}
 		}
@@ -183,5 +186,72 @@ func TestHyperlinkSurvivesSelection(t *testing.T) {
 	}
 	if text := rest[:j]; strings.Contains(text, "\x1b]") || strings.Contains(text, "\n") {
 		t.Errorf("link text is broken up: %q", text)
+	}
+}
+
+func TestSpinnerStopsWhenIdle(t *testing.T) {
+	// loaded() fed a snapshot, so stopBusy already cleared busy
+	next, cmd := loaded(t).Update(spinMsg{})
+	m := next.(Model)
+	if cmd != nil {
+		t.Error("spinner chain kept going with nothing in flight")
+	}
+	if m.spinning {
+		t.Error("spinning should be false once the chain ends")
+	}
+
+	m.busy, m.busyAt = "working", time.Now()
+	before := m.frame
+	next, cmd = m.Update(spinMsg{})
+	if cmd == nil {
+		t.Fatal("spinner chain stopped while busy")
+	}
+	if got := next.(Model).frame; got != before+1 {
+		t.Errorf("frame = %d, want %d", got, before+1)
+	}
+}
+
+func TestSpinnerDoesNotRescan(t *testing.T) {
+	m := loaded(t)
+	m.busy, m.busyAt = "working", time.Now()
+	_, cmd := m.Update(spinMsg{})
+	if cmd == nil {
+		t.Fatal("no spinner cmd")
+	}
+	if got, want := fmt.Sprintf("%T", cmd()), fmt.Sprintf("%T", spinMsg{}); got != want {
+		t.Errorf("spinMsg produced %s, want %s", got, want)
+	}
+}
+
+func TestCtrlCClearsThenExits(t *testing.T) {
+	m := press(loaded(t), "/", "c", "e", "l", "ctrl+c")
+	if m.mode != modeList || m.filter != "" || len(m.visible) != 3 {
+		t.Fatalf("mode=%d filter=%q visible=%d", m.mode, m.filter, len(m.visible))
+	}
+	if m.statusKind != statusHint {
+		t.Errorf("statusKind = %d, want statusHint", m.statusKind)
+	}
+
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	if cmd == nil {
+		t.Fatal("second ctrl+c returned no cmd")
+	}
+	if got, want := fmt.Sprintf("%T", cmd()), fmt.Sprintf("%T", tea.Quit()); got != want {
+		t.Errorf("second ctrl+c produced %s, want %s", got, want)
+	}
+}
+
+func TestCtrlCWindowExpires(t *testing.T) {
+	m := loaded(t)
+	m.lastCtrlC = time.Now().Add(-5 * time.Second)
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	if cmd == nil {
+		t.Fatal("stale ctrl+c returned no cmd")
+	}
+	if got := fmt.Sprintf("%T", cmd()); got == fmt.Sprintf("%T", tea.Quit()) {
+		t.Error("ctrl+c outside the window quit the app")
+	}
+	if next.(Model).statusKind != statusHint {
+		t.Error("stale ctrl+c should re-arm the hint")
 	}
 }

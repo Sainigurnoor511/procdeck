@@ -50,6 +50,7 @@ press `a` to see every process.
 | `/` | filter by name, project, port or command |
 | `a` | toggle all processes |
 | `q` | quit |
+| `ctrl+c` | cancel / clear the filter; press again within 1.5 s to exit |
 
 End and restart ask for `y` first.
 

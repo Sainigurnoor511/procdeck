@@ -14,7 +14,14 @@ import (
 	"procdeck/internal/scan"
 )
 
-const refreshEvery = 2 * time.Second
+const (
+	refreshEvery = 2 * time.Second
+	spinEvery    = 120 * time.Millisecond
+	ctrlCWindow  = 1500 * time.Millisecond
+)
+
+// asterisk family, all width-1 in runewidth
+var spinFrames = []string{"·", "✢", "✳", "∗", "✻", "✽"}
 
 type mode int
 
@@ -22,6 +29,14 @@ const (
 	modeList mode = iota
 	modeFilter
 	modeConfirm
+)
+
+type statusKind int
+
+const (
+	statusInfo statusKind = iota
+	statusError
+	statusHint
 )
 
 type snapMsg struct {
@@ -32,6 +47,12 @@ type snapMsg struct {
 }
 
 type tickMsg struct{}
+
+// spinMsg drives the spinner frames only. It must never trigger a scan, or the
+// single refresh chain forks.
+type spinMsg struct{}
+
+type hintExpiredMsg struct{}
 
 type doneMsg struct {
 	text string
@@ -55,18 +76,31 @@ type Model struct {
 	prompt  string
 	pending tea.Cmd
 
-	status    string
-	statusErr bool
-	width     int
-	height    int
+	busy     string
+	busyAt   time.Time
+	busyFor  time.Duration
+	frame    int
+	spinning bool
+
+	lastCtrlC time.Time
+
+	status     string
+	statusKind statusKind
+	width      int
+	height     int
 }
 
 func New(scanner *scan.Scanner) Model {
-	return Model{scanner: scanner, width: 100, height: 30}
+	// the first scan is already in flight from Init, so seed the spinner here:
+	// a value-receiver Init cannot mutate the model
+	return Model{
+		scanner: scanner, width: 100, height: 30,
+		busy: "scanning", busyAt: time.Now(), spinning: true,
+	}
 }
 
 func (m Model) Init() tea.Cmd {
-	return m.scan(true)
+	return tea.Batch(m.scan(true), spinCmd())
 }
 
 func (m Model) scan(chained bool) tea.Cmd {
@@ -85,6 +119,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case snapMsg:
+		m.stopBusy()
 		if msg.err != nil {
 			m.setStatus("scan failed: "+msg.err.Error(), true)
 		} else {
@@ -99,7 +134,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tickMsg:
 		return m, m.scan(true)
 
+	case spinMsg:
+		if m.busy == "" {
+			// nothing in flight: end the frame chain so an idle app goes quiet
+			m.spinning = false
+			return m, nil
+		}
+		m.frame++
+		m.busyFor = time.Since(m.busyAt)
+		return m, spinCmd()
+
+	case hintExpiredMsg:
+		if m.statusKind == statusHint {
+			m.status, m.statusKind = "", statusInfo
+		}
+		return m, nil
+
 	case doneMsg:
+		m.stopBusy()
 		if msg.err != nil {
 			m.setStatus(msg.err.Error(), true)
 		} else {
@@ -121,8 +173,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m Model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
-	case "q", "ctrl+c":
+	case "q":
 		return m, tea.Quit
+	case "ctrl+c":
+		return m.interrupt()
 	case "up", "k":
 		m.move(-1)
 	case "down", "j":
@@ -172,7 +226,7 @@ func (m Model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m Model) updateFilter(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyCtrlC:
-		return m, tea.Quit
+		return m.interrupt()
 	case tea.KeyEnter:
 		m.mode = modeList
 	case tea.KeyEsc:
@@ -192,14 +246,54 @@ func (m Model) updateFilter(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) updateConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if msg.Type == tea.KeyCtrlC {
+		return m.interrupt()
+	}
 	cmd := m.pending
 	m.mode, m.pending, m.prompt = modeList, nil, ""
 	if s := msg.String(); s == "y" || s == "Y" {
-		m.setStatus("working…", false)
-		return m, cmd
+		spin := m.startBusy("working")
+		return m, tea.Batch(cmd, spin)
 	}
 	m.setStatus("cancelled", false)
 	return m, nil
+}
+
+// interrupt is Claude Code's ctrl+c: the first press cancels whatever is on
+// screen, a second press inside ctrlCWindow exits.
+func (m Model) interrupt() (tea.Model, tea.Cmd) {
+	now := time.Now()
+	if !m.lastCtrlC.IsZero() && now.Sub(m.lastCtrlC) <= ctrlCWindow {
+		return m, tea.Quit
+	}
+	m.lastCtrlC = now
+	m.mode, m.prompt, m.pending = modeList, "", nil
+	if m.filter != "" {
+		m.filter = ""
+		m.rebuild()
+	}
+	m.setHint("press ctrl+c again to exit")
+	return m, tea.Tick(ctrlCWindow, func(time.Time) tea.Msg { return hintExpiredMsg{} })
+}
+
+func spinCmd() tea.Cmd {
+	return tea.Tick(spinEvery, func(time.Time) tea.Msg { return spinMsg{} })
+}
+
+// startBusy returns a frame ticker only when one is not already running, so a
+// second start never forks a second chain.
+func (m *Model) startBusy(label string) tea.Cmd {
+	m.busy, m.busyAt, m.busyFor, m.frame = label, time.Now(), 0, 0
+	m.status, m.statusKind = "", statusInfo
+	if m.spinning {
+		return nil
+	}
+	m.spinning = true
+	return spinCmd()
+}
+
+func (m *Model) stopBusy() {
+	m.busy, m.busyFor = "", 0
 }
 
 func (m *Model) ask(prompt string, cmd tea.Cmd) {
@@ -207,7 +301,14 @@ func (m *Model) ask(prompt string, cmd tea.Cmd) {
 }
 
 func (m *Model) setStatus(text string, isErr bool) {
-	m.status, m.statusErr = text, isErr
+	m.status, m.statusKind = text, statusInfo
+	if isErr {
+		m.statusKind = statusError
+	}
+}
+
+func (m *Model) setHint(text string) {
+	m.status, m.statusKind = text, statusHint
 }
 
 func (m Model) current() (group.Service, bool) {
