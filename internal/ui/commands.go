@@ -27,8 +27,9 @@ type command struct {
 // commandOrder is the registry. It is an ordered slice because the suggestion
 // list, the fuzzy tie-break and /help all need the same deterministic order.
 //
-// /help and /doctor are deliberately absent: they arrive with their panels, so
-// no entry here ever has a handler that does nothing.
+// /help is first because it is the way out of not knowing the rest, which also
+// means a bare / followed by enter opens it. /doctor sits next to /config, the
+// short version of the same facts.
 var commandOrder []command
 
 // init fills the registry. It cannot be a plain var initialiser: a handler
@@ -37,6 +38,7 @@ var commandOrder []command
 // cycle even though nothing actually runs at init time.
 func init() {
 	commandOrder = []command{
+		{"help", "", "list every key and every command", cmdHelp},
 		{"theme", "[name]", "switch the color theme, or cycle with no name", cmdTheme},
 		{"themes", "", "list the available color themes", cmdThemes},
 		{"filter", "<text>", "narrow the list to matching services", cmdFilter},
@@ -49,6 +51,7 @@ func init() {
 		{"open", "[name]", "open a service's link in a browser", cmdOpen},
 		{"copy", "[name]", "copy a service's command line", cmdCopy},
 		{"config", "", "show the config file path and the current settings", cmdConfig},
+		{"doctor", "", "report the terminal, config and scan diagnostics", cmdDoctor},
 		{"version", "", "show the procdeck and Go versions", cmdVersion},
 		{"quit", "", "quit procdeck", cmdQuit},
 	}
@@ -206,6 +209,20 @@ func (m Model) updateCommand(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	m.clampCmdSel()
 	m.clampScroll()
+	return m, nil
+}
+
+// cmdHelp and cmdDoctor open the two panels. runCommand has already put the
+// model back in modeList, which is why these set their mode afterwards.
+func cmdHelp(m Model, _ string) (Model, tea.Cmd) {
+	m.mode, m.panelOffset = modeHelp, 0
+	return m, nil
+}
+
+// cmdDoctor takes the snapshot here, once, so View never does a syscall.
+func cmdDoctor(m Model, _ string) (Model, tea.Cmd) {
+	m.report = m.buildReport()
+	m.mode, m.panelOffset = modeDoctor, 0
 	return m, nil
 }
 

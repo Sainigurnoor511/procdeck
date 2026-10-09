@@ -129,32 +129,40 @@ func (m Model) View() string {
 	var out []string
 	out = append(out, m.header(w))
 
-	rows := []string{m.headRow(cols)}
-	limit := m.tableRows()
-	switch {
-	case !m.loaded:
-		rows = append(rows, padTo(" "+m.busyLine(), inner))
-	case len(m.visible) == 0:
-		rows = append(rows, s.dim.Render(fit("  "+m.emptyText(), inner)))
-	}
-	end := m.offset + limit
-	if end > len(m.visible) {
-		end = len(m.visible)
-	}
-	for i := m.offset; i < end; i++ {
-		rows = append(rows, m.row(m.visible[i], cols, i == m.cursor))
-	}
-	for len(rows) < limit+1 {
-		rows = append(rows, strings.Repeat(" ", inner))
-	}
-	foot := ""
-	if len(m.visible) > limit {
-		foot = fmt.Sprintf("%d–%d of %d", m.offset+1, end, len(m.visible))
-	}
-	out = append(out, m.box("", foot, rows, inner)...)
+	if m.panelMode() {
+		// the panel stands in for the table box AND the detail box, and
+		// panelRows is sized to exactly what those two would have used, so the
+		// frame is still m.height lines tall
+		title, lines := m.panelContent(inner)
+		out = append(out, m.panelBox(title, lines, inner)...)
+	} else {
+		rows := []string{m.headRow(cols)}
+		limit := m.tableRows()
+		switch {
+		case !m.loaded:
+			rows = append(rows, padTo(" "+m.busyLine(), inner))
+		case len(m.visible) == 0:
+			rows = append(rows, s.dim.Render(fit("  "+m.emptyText(), inner)))
+		}
+		end := m.offset + limit
+		if end > len(m.visible) {
+			end = len(m.visible)
+		}
+		for i := m.offset; i < end; i++ {
+			rows = append(rows, m.row(m.visible[i], cols, i == m.cursor))
+		}
+		for len(rows) < limit+1 {
+			rows = append(rows, strings.Repeat(" ", inner))
+		}
+		foot := ""
+		if len(m.visible) > limit {
+			foot = fmt.Sprintf("%d–%d of %d", m.offset+1, end, len(m.visible))
+		}
+		out = append(out, m.box("", foot, rows, inner)...)
 
-	if m.showDetail() {
-		out = append(out, m.detail(inner)...)
+		if m.showDetail() {
+			out = append(out, m.detail(inner)...)
+		}
 	}
 	if m.showStatus() {
 		out = append(out, m.statusLine(w))
@@ -317,6 +325,11 @@ func (m Model) inputBox(w int) string {
 			prompt = truncate(m.prompt, budget)
 		}
 		content = glyph + prompt + answer
+	case m.panelMode():
+		// a read-only panel has nothing to type into, so the slot says how to
+		// move and how to leave
+		fg = th.Dim
+		content = "> esc returns · ↑↓ scrolls"
 	case m.mode == modeCommand:
 		border = th.Accent
 		content = "> /" + m.cmdInput + "▌"

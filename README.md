@@ -42,18 +42,72 @@ press `a` to see every process.
 | Key | Action |
 |---|---|
 | `↑` `↓` `j` `k` | move |
+| `pgup` / `pgdown` | move a page |
+| `home` / `g`, `end` / `G` | jump to the first / last row |
 | `r` | restart in a new console window, same command, folder and environment |
 | `x` | end the whole process tree |
 | `D` | end all duplicates |
 | `o` / `enter` | open the link in the browser |
 | `c` | copy the command line |
-| `/` | filter by name, project, port or command |
+| `/` | open the command input (slash commands) |
+| `f` | filter by name, project, port or command |
+| `esc` | clear an active filter |
 | `a` | toggle all processes |
 | `t` / `T` | next / previous color theme |
 | `q` | quit |
-| `ctrl+c` | cancel / clear the filter; press again within 1.5 s to exit |
+| `ctrl+c` | cancel what is on screen; press again within 1.5 s to exit |
 
 End and restart ask for `y` first.
+
+Press `/help` inside procdeck for the same table plus every command. That panel
+is generated from the keymap and the command registry, so it cannot fall behind
+this README.
+
+## Slash commands
+
+`/` opens a command input with fuzzy-matched suggestions. `tab` completes the
+highlighted one, `enter` runs it, `esc` or backspacing past the `/` closes it.
+Once you type a space the suggestions close and `enter` takes the literal text,
+so arguments work. A bare `/` followed by `enter` opens `/help`, the first entry
+in the registry.
+
+| Command | Does |
+|---|---|
+| `/help` | list every key and every command, scrollable |
+| `/theme [name]` | switch the color theme, or cycle with no name |
+| `/themes` | list the available color themes |
+| `/filter <text>` | narrow the list to matching services |
+| `/all` | toggle showing every process, not just coding ones |
+| `/clear` | clear the filter and the status line |
+| `/refresh [seconds]` | show or set how often procdeck rescans |
+| `/end [name]` | end a service, after a confirm |
+| `/restart [name]` | restart a service in a new window |
+| `/end-duplicates` | end every duplicate service at once |
+| `/open [name]` | open a service's link in a browser |
+| `/copy [name]` | copy a service's command line |
+| `/config` | show the config file path and the current settings |
+| `/doctor` | report the terminal, config and scan diagnostics |
+| `/version` | show the procdeck and Go versions |
+| `/quit` | quit procdeck |
+
+An optional `[name]` defaults to the row under the cursor and is otherwise a
+case-insensitive substring of a visible service's name or project. A name that
+matches two services reports both and acts on neither — a slash command never
+ends something you did not name, and `/end`, `/restart` and `/end-duplicates`
+go through the same `y`/`n` confirm as the `x`, `r` and `D` keys.
+
+An unknown command or a rejected argument always says what was wrong; nothing
+fails silently.
+
+`/help` and `/doctor` open a full-height panel in place of the table. `↑` `↓`
+`j` `k`, `pgup`/`pgdown` and `home`/`end` scroll it; `esc` or `q` returns to the
+list. `/doctor` reports the color profile, the detected background, the terminal
+size as procdeck sees it, the config path with its read and write status, the
+effective scan interval, the counts from the last scan and how many processes
+refused access. Its report is taken when you run the command, not per frame.
+The hyperlink row is an honest guess from `WT_SESSION`, `TERM_PROGRAM` and
+`VTE_VERSION`: nothing is probed, and procdeck emits the OSC 8 escape either
+way.
 
 ## Themes
 
@@ -77,17 +131,32 @@ overwriting what `t` saved. An unknown name is rejected rather than ignored.
 Every theme follows the terminal's light or dark background, and keeps the
 running, duplicate and restricted states distinguishable. `mono` has no hue to
 spend, so it leans on the `●` `▲` `○` glyphs and the `(duplicate)` suffix just
-as much as on brightness.
+as much as on brightness, and it also renders duplicate rows **bold** — the one
+theme that does.
 
-The remembered theme lives in `%APPDATA%\procdeck\config.json`:
+## Settings
+
+Remembered settings live in `%APPDATA%\procdeck\config.json`:
 
 ```json
-{"theme":"nord"}
+{"theme":"nord","refreshIntervalSeconds":2}
 ```
 
-That file holds nothing else. A missing one is the normal first run; an
-unreadable, malformed, or unknown-theme file falls back to `claude` and says so
-in the status line rather than failing to start.
+Those two keys are the whole schema. `refreshIntervalSeconds` is how often
+procdeck rescans — `/refresh <seconds>` sets it, the floor is 1 second and the
+ceiling is 3600, and a new interval takes effect from the next scan. The key is
+omitted while the interval is the default of 2 seconds, so a theme-only
+preference still writes just `{"theme":"nord"}`.
+
+Nothing about this file is fatal. A missing one is the normal first run. An
+unreadable or malformed file, an unknown theme name, an out-of-range interval
+and an unrecognised key each fall back to the default for that one setting and
+say so in the status line rather than stopping procdeck from starting. Writes go
+to a temp file and are renamed into place, and the two keys are written
+independently, so switching a theme cannot forget a configured interval.
+
+`/config` prints the path and the live settings on the status line; `/doctor`
+adds whether the file can be read and the directory written.
 
 Palettes come from [Nord](https://www.nordtheme.com/docs/colors-and-palettes/),
 [gruvbox](https://github.com/morhetz/gruvbox),
@@ -104,7 +173,21 @@ Needs Go 1.27 or newer.
 go install ./cmd/procdeck
 ```
 
-This puts `procdeck.exe` in `%USERPROFILE%\go\bin`. Then run `procdeck`.
+This puts `procdeck.exe` in `$env:GOBIN`, or `%USERPROFILE%\go\bin` when GOBIN
+is unset. Then run `procdeck` from anywhere — as long as that directory is on
+your `PATH`. If it is not, add it:
+
+```powershell
+[Environment]::SetEnvironmentVariable(
+    'Path',
+    [Environment]::GetEnvironmentVariable('Path', 'User') + ";$env:USERPROFILE\go\bin",
+    'User')
+```
+
+From a clone, `.\build.ps1 -Install` does the same thing from the working tree:
+it builds `.\bin\procdeck.exe`, runs `go install`, prints where the binary
+landed, and warns if that directory is not on `PATH`. Add `-Test` to gate the
+build on `go test ./...`, and `-NoRun` to stop it launching the TUI afterwards.
 
 `procdeck -list` prints the services once and exits; add `-all` for everything.
 `procdeck -themes` lists the color themes.

@@ -82,6 +82,10 @@ func frames(m Model) string {
 			{"confirm", press(base, "x")},
 			{"command", press(base, "/")},
 			{"command-suggest", press(base, "/", "t", "h")},
+			// /help is in the golden because it is generated from two static
+			// tables; /doctor deliberately is NOT, because its content depends
+			// on the terminal and the config directory
+			{"help", press(base, "/", "h", "e", "l", "p", "enter")},
 			{"all", press(base, "a")},
 			{"moved", press(base, "down", "down")},
 			{"busy", withBusy(base)},

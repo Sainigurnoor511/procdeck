@@ -35,6 +35,11 @@ const (
 	// modeCommand is the / input with its suggestion rows. New modes are
 	// appended so the existing values never shift.
 	modeCommand
+	// modeHelp and modeDoctor are full-content panels: each replaces the table
+	// and detail boxes rather than floating over them, so View still emits
+	// exactly height lines.
+	modeHelp
+	modeDoctor
 )
 
 type statusKind int
@@ -100,6 +105,11 @@ type Model struct {
 	// suggestion.
 	cmdInput string
 	cmdSel   int
+
+	// panelOffset scrolls whichever panel is open; report is /doctor's
+	// snapshot, taken when the command runs rather than per frame.
+	panelOffset int
+	report      []reportRow
 
 	busy     string
 	busyAt   time.Time
@@ -208,6 +218,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateConfirm(msg)
 		case modeCommand:
 			return m.updateCommand(msg)
+		case modeHelp, modeDoctor:
+			return m.updatePanel(msg)
 		}
 		return m.updateList(msg)
 	}
@@ -369,6 +381,7 @@ func (m Model) interrupt() (tea.Model, tea.Cmd) {
 	m.lastCtrlC = now
 	m.mode, m.prompt, m.pending = modeList, "", nil
 	m.cmdInput, m.cmdSel = "", 0
+	m.panelOffset = 0
 	if m.filter != "" {
 		m.filter = ""
 		m.rebuild()

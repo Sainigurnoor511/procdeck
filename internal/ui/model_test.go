@@ -258,6 +258,9 @@ func TestViewLinesFitWidth(t *testing.T) {
 			"cmd-empty":    press(base, "/"),
 			"cmd-matching": press(base, "/", "e", "n"),
 			"cmd-args":     press(base, "/", "e", "n", "d", "space", "c", "e", "l"),
+			// the panels replace the table area, so they carry the same
+			// contract on their own
+			"help": press(base, "/", "h", "e", "l", "p", "enter"),
 		}
 		for name, m := range states {
 			lines := strings.Split(m.View(), "\n")
@@ -285,6 +288,7 @@ func TestInputBoxGeometry(t *testing.T) {
 		"command":   press(loaded(t), "/"),
 		"cmd-typed": press(loaded(t), "/", "t", "h"),
 		"cmd-args":  press(loaded(t), "/", "f", "i", "l", "t", "e", "r", "space"),
+		"panel":     press(loaded(t), "/", "h", "e", "l", "p", "enter"),
 	}
 	for name, m := range states {
 		for _, w := range []int{60, 80, 120} {
