@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 	"text/tabwriter"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -16,7 +17,16 @@ import (
 func main() {
 	list := flag.Bool("list", false, "print services once and exit")
 	all := flag.Bool("all", false, "with -list, include tooling and unclassified processes")
+	theme := flag.String("theme", "", "start with a named color theme for this run only; ignored with -list")
+	listThemes := flag.Bool("themes", false, "list the color theme names and exit")
 	flag.Parse()
+
+	if *listThemes {
+		for _, name := range ui.ThemeNames() {
+			fmt.Println(name)
+		}
+		return
+	}
 
 	if *list {
 		if err := printList(*all); err != nil {
@@ -26,11 +36,32 @@ func main() {
 		return
 	}
 
-	program := tea.NewProgram(ui.New(scan.New()), tea.WithAltScreen())
+	program := tea.NewProgram(startModel(*theme), tea.WithAltScreen())
 	if _, err := program.Run(); err != nil {
 		fmt.Fprintln(os.Stderr, "procdeck:", err)
 		os.Exit(1)
 	}
+}
+
+// startModel builds the TUI model with its theme resolved. An explicit -theme
+// is a one-off override for this run and does not overwrite the preference
+// t / T saved; an unknown name is rejected rather than quietly ignored.
+func startModel(theme string) ui.Model {
+	model := ui.New(scan.New())
+	if theme != "" {
+		if !ui.ThemeExists(theme) {
+			fmt.Fprintf(os.Stderr, "procdeck: unknown theme %q\nvalid themes: %s\n",
+				theme, strings.Join(ui.ThemeNames(), ", "))
+			os.Exit(1)
+		}
+		return model.WithTheme(theme)
+	}
+	name, warning := ui.LoadTheme()
+	model = model.WithTheme(name)
+	if warning != "" {
+		model = model.WithWarning(warning)
+	}
+	return model
 }
 
 func printList(all bool) error {

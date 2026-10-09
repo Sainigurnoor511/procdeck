@@ -59,6 +59,11 @@ type doneMsg struct {
 	err  error
 }
 
+// themeSavedMsg reports the result of remembering a theme. It exists so the
+// write can happen off the update loop without reusing doneMsg, which would
+// trigger a scan and fork the single refresh chain.
+type themeSavedMsg struct{ err error }
+
 type Model struct {
 	scanner *scan.Scanner
 	snap    scan.Snapshot
@@ -88,6 +93,8 @@ type Model struct {
 	statusKind statusKind
 	width      int
 	height     int
+
+	theme Theme
 }
 
 func New(scanner *scan.Scanner) Model {
@@ -96,6 +103,7 @@ func New(scanner *scan.Scanner) Model {
 	return Model{
 		scanner: scanner, width: 100, height: 30,
 		busy: "scanning", busyAt: time.Now(), spinning: true,
+		theme: themeOrder[0],
 	}
 }
 
@@ -159,6 +167,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, m.scan(false)
 
+	case themeSavedMsg:
+		if msg.err != nil {
+			m.setStatus("could not remember the theme: "+msg.err.Error(), true)
+		}
+		return m, nil
+
 	case tea.KeyMsg:
 		switch m.mode {
 		case modeFilter:
@@ -219,8 +233,35 @@ func (m Model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if svc, ok := m.current(); ok {
 			return m, copyCmd(svc)
 		}
+	case "t":
+		return m.cycleTheme(1)
+	case "T":
+		return m.cycleTheme(-1)
 	}
 	return m, nil
+}
+
+// cycleTheme steps the palette and remembers the choice. It deliberately
+// touches no scan path: the refresh chain stays with Init, tickMsg and doneMsg.
+func (m Model) cycleTheme(delta int) (tea.Model, tea.Cmd) {
+	m.theme = nextTheme(m.activeTheme().Name, delta)
+	m.setStatus("theme: "+m.theme.Name, false)
+	return m, saveThemeCmd(m.theme.Name)
+}
+
+// WithTheme applies a named theme without persisting it. An unknown name is
+// ignored: the caller validates with ThemeExists and reports the problem.
+func (m Model) WithTheme(name string) Model {
+	if t, ok := themeByName(name); ok {
+		m.theme = t
+	}
+	return m
+}
+
+// WithWarning seeds a visible, non-fatal startup message.
+func (m Model) WithWarning(text string) Model {
+	m.setStatus(text, true)
+	return m
 }
 
 func (m Model) updateFilter(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -278,6 +319,10 @@ func (m Model) interrupt() (tea.Model, tea.Cmd) {
 
 func spinCmd() tea.Cmd {
 	return tea.Tick(spinEvery, func(time.Time) tea.Msg { return spinMsg{} })
+}
+
+func saveThemeCmd(name string) tea.Cmd {
+	return func() tea.Msg { return themeSavedMsg{err: saveTheme(name)} }
 }
 
 // startBusy returns a frame ticker only when one is not already running, so a

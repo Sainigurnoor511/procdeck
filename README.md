@@ -49,10 +49,52 @@ press `a` to see every process.
 | `c` | copy the command line |
 | `/` | filter by name, project, port or command |
 | `a` | toggle all processes |
+| `t` / `T` | next / previous color theme |
 | `q` | quit |
 | `ctrl+c` | cancel / clear the filter; press again within 1.5 s to exit |
 
 End and restart ask for `y` first.
+
+## Themes
+
+Six palettes ship with procdeck:
+
+| Name | Look |
+|---|---|
+| `claude` | warm terracotta (the default) |
+| `nord` | cool blue-grey |
+| `gruvbox` | warm retro |
+| `tokyonight` | purple-blue |
+| `catppuccin` | pastel |
+| `mono` | grayscale, no accent hue |
+
+Press `t` and `T` to walk through them; the name shows in the status line and
+the choice is remembered for next time. `procdeck -themes` prints the names,
+and `procdeck -theme nord` starts in a named theme for that run only, without
+overwriting what `t` saved. An unknown name is rejected rather than ignored.
+`-theme` has no effect alongside `-list`.
+
+Every theme follows the terminal's light or dark background, and keeps the
+running, duplicate and restricted states distinguishable. `mono` has no hue to
+spend, so it leans on the `●` `▲` `○` glyphs and the `(duplicate)` suffix just
+as much as on brightness.
+
+The remembered theme lives in `%APPDATA%\procdeck\config.json`:
+
+```json
+{"theme":"nord"}
+```
+
+That file holds nothing else. A missing one is the normal first run; an
+unreadable, malformed, or unknown-theme file falls back to `claude` and says so
+in the status line rather than failing to start.
+
+Palettes come from [Nord](https://www.nordtheme.com/docs/colors-and-palettes/),
+[gruvbox](https://github.com/morhetz/gruvbox),
+[tokyonight.nvim](https://github.com/folke/tokyonight.nvim) and
+[Catppuccin](https://github.com/catppuccin/catppuccin). Nord ships dark-only, so
+its light half is derived rather than upstream; a few other values are nudged
+for legibility in a box-heavy TUI, and `internal/ui/theme.go` says which and why.
 
 ## Install
 
@@ -65,6 +107,7 @@ go install ./cmd/procdeck
 This puts `procdeck.exe` in `%USERPROFILE%\go\bin`. Then run `procdeck`.
 
 `procdeck -list` prints the services once and exits; add `-all` for everything.
+`procdeck -themes` lists the color themes.
 
 ## Develop
 

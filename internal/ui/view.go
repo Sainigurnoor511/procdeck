@@ -12,31 +12,19 @@ import (
 	"procdeck/internal/group"
 )
 
-var (
-	colAccent = lipgloss.AdaptiveColor{Dark: "#D97757", Light: "#B2552F"}
-	colText   = lipgloss.AdaptiveColor{Dark: "#E8E4DF", Light: "#1C1A17"}
-	colDim    = lipgloss.AdaptiveColor{Dark: "#8A827A", Light: "#6B635B"}
-	colBorder = lipgloss.AdaptiveColor{Dark: "#45403A", Light: "#D6CFC7"}
-	colGreen  = lipgloss.AdaptiveColor{Dark: "#7FA86A", Light: "#3F6B2E"}
-	colAmber  = lipgloss.AdaptiveColor{Dark: "#D3A05A", Light: "#8A5E14"}
-	colRed    = lipgloss.AdaptiveColor{Dark: "#C96A62", Light: "#A3362E"}
-	colSelBg  = lipgloss.AdaptiveColor{Dark: "#2E2A26", Light: "#EFE8E0"}
+// every box border rune comes from here, nothing is hand-written
+var rounded = lipgloss.RoundedBorder()
 
-	styleTitle   = lipgloss.NewStyle().Bold(true).Foreground(colAccent)
-	styleBorder  = lipgloss.NewStyle().Foreground(colBorder)
-	styleHead    = lipgloss.NewStyle().Bold(true).Foreground(colDim)
-	styleDim     = lipgloss.NewStyle().Foreground(colDim)
-	styleText    = lipgloss.NewStyle().Foreground(colText)
-	styleHintKey = lipgloss.NewStyle().Bold(true).Foreground(colDim)
-	styleAccent  = lipgloss.NewStyle().Foreground(colAccent)
-	styleLabel   = lipgloss.NewStyle().Foreground(colAccent)
-	styleOK      = lipgloss.NewStyle().Foreground(colGreen)
-	styleWarn    = lipgloss.NewStyle().Foreground(colAmber).Bold(true)
-	styleErr     = lipgloss.NewStyle().Foreground(colRed)
+// activeTheme never returns a zero Theme, so a hand-built Model{} renders in
+// the default theme instead of with empty color strings.
+func (m Model) activeTheme() Theme {
+	if m.theme.Name == "" {
+		return themeOrder[0]
+	}
+	return m.theme
+}
 
-	// every box border rune comes from here, nothing is hand-written
-	rounded = lipgloss.RoundedBorder()
-)
+func (m Model) styles() styles { return newStyles(m.activeTheme()) }
 
 type columns struct {
 	name, project, port, link, cpu, mem, up int
@@ -102,6 +90,7 @@ func (m Model) layout() columns {
 }
 
 func (m Model) View() string {
+	s := m.styles()
 	w := m.viewWidth()
 	inner := w - 2
 	cols := m.layout()
@@ -115,7 +104,7 @@ func (m Model) View() string {
 	case !m.loaded:
 		rows = append(rows, padTo(" "+m.busyLine(), inner))
 	case len(m.visible) == 0:
-		rows = append(rows, styleDim.Render(fit("  "+m.emptyText(), inner)))
+		rows = append(rows, s.dim.Render(fit("  "+m.emptyText(), inner)))
 	}
 	end := m.offset + limit
 	if end > len(m.visible) {
@@ -131,7 +120,7 @@ func (m Model) View() string {
 	if len(m.visible) > limit {
 		foot = fmt.Sprintf("%d–%d of %d", m.offset+1, end, len(m.visible))
 	}
-	out = append(out, box("", foot, rows, inner)...)
+	out = append(out, m.box("", foot, rows, inner)...)
 
 	if m.showDetail() {
 		out = append(out, m.detail(inner)...)
@@ -154,14 +143,15 @@ func (m Model) emptyText() string {
 }
 
 func (m Model) header(w int) string {
-	left := styleTitle.Render(" ✻ procdeck")
+	s := m.styles()
+	left := s.title.Render(" ✻ procdeck")
 	dups := countDuplicates(m.services)
-	right := styleDim.Render(plural(len(m.services), "service"))
+	right := s.dim.Render(plural(len(m.services), "service"))
 	if dups > 0 {
-		right += styleDim.Render(" · ") + styleWarn.Render("▲ "+plural(dups, "duplicate"))
+		right += s.dim.Render(" · ") + s.warn.Render("▲ "+plural(dups, "duplicate"))
 	}
 	if m.showAll {
-		right += styleDim.Render(" · all processes")
+		right += s.dim.Render(" · all processes")
 	}
 	gap := w - lipgloss.Width(left) - lipgloss.Width(right)
 	if gap < 1 {
@@ -179,28 +169,29 @@ func (m Model) headRow(c columns) string {
 	if c.up > 0 {
 		s += fitRight("UP", c.up)
 	}
-	return styleHead.Render(s)
+	return m.styles().head.Render(s)
 }
 
 func (m Model) row(svc group.Service, c columns, selected bool) string {
-	base := lipgloss.NewStyle().Foreground(colText)
-	dot := lipgloss.NewStyle().Foreground(colGreen)
+	th := m.activeTheme()
+	base := lipgloss.NewStyle().Foreground(th.Text)
+	dot := lipgloss.NewStyle().Foreground(th.Green)
 	glyph := "●"
 	switch {
 	case svc.Restricted():
-		base = base.Foreground(colDim)
-		dot, glyph = dot.Foreground(colDim), "○"
+		base = base.Foreground(th.Dim)
+		dot, glyph = dot.Foreground(th.Dim), "○"
 	case svc.Duplicate:
-		base = base.Foreground(colAmber)
-		dot, glyph = dot.Foreground(colAmber), "▲"
+		base = base.Foreground(th.Amber)
+		dot, glyph = dot.Foreground(th.Amber), "▲"
 	}
-	muted := lipgloss.NewStyle().Foreground(colDim)
-	link := lipgloss.NewStyle().Foreground(colAccent).Underline(true)
+	muted := lipgloss.NewStyle().Foreground(th.Dim)
+	link := lipgloss.NewStyle().Foreground(th.Accent).Underline(true)
 	if selected {
-		base = base.Background(colSelBg).Bold(true)
-		dot = dot.Background(colSelBg)
-		muted = muted.Background(colSelBg)
-		link = link.Background(colSelBg)
+		base = base.Background(th.SelBg).Bold(true)
+		dot = dot.Background(th.SelBg)
+		muted = muted.Background(th.SelBg)
+		link = link.Background(th.SelBg)
 	}
 
 	name := svc.Name
@@ -228,10 +219,11 @@ func (m Model) row(svc group.Service, c columns, selected bool) string {
 }
 
 func (m Model) detail(inner int) []string {
+	s := m.styles()
 	svc, ok := m.current()
 	if !ok {
 		blank := strings.Repeat(" ", inner)
-		return box("details", "", []string{blank, blank, blank, blank}, inner)
+		return m.box("details", "", []string{blank, blank, blank, blank}, inner)
 	}
 	facts := []string{"pid " + strconv.Itoa(int(svc.Root.PID))}
 	if svc.Variant != "" {
@@ -249,36 +241,37 @@ func (m Model) detail(inner int) []string {
 	note := ""
 	switch {
 	case svc.Duplicate:
-		note = styleWarn.Render(fit(" ▲ another copy of this service is already running in the same folder", inner))
+		note = s.warn.Render(fit(" ▲ another copy of this service is already running in the same folder", inner))
 	case svc.Protected:
-		note = styleDim.Render(fit(" procdeck is running inside this process tree — end and restart are disabled", inner))
+		note = s.dim.Render(fit(" procdeck is running inside this process tree — end and restart are disabled", inner))
 	case svc.Restricted():
-		note = styleDim.Render(fit(" no access to this process — run procdeck as administrator to manage it", inner))
+		note = s.dim.Render(fit(" no access to this process — run procdeck as administrator to manage it", inner))
 	default:
 		note = strings.Repeat(" ", inner)
 	}
 
 	field := func(label, value string) string {
-		return styleLabel.Render(" "+label+" ") + styleText.Render(fit(value, inner-len(label)-2))
+		return s.label.Render(" "+label+" ") + s.text.Render(fit(value, inner-len(label)-2))
 	}
 	lines := []string{
-		styleText.Render(fit(" "+strings.Join(facts, "  ·  "), inner)),
+		s.text.Render(fit(" "+strings.Join(facts, "  ·  "), inner)),
 		field("cmd", svc.Root.Cmdline),
 		field("cwd", svc.Root.Cwd),
 		note,
 	}
-	return box(svc.Name, "", lines, inner)
+	return m.box(svc.Name, "", lines, inner)
 }
 
 // inputBox is always rendered: it is the prompt, the filter editor and the
 // confirm prompt in one always-visible slot.
 func (m Model) inputBox(w int) string {
+	th := m.activeTheme()
 	inner := w - 2
-	border, fg := colBorder, colText
+	border, fg := th.Border, th.Text
 	content := "> " + m.filter + "   (esc clears)"
 	switch {
 	case m.mode == modeConfirm:
-		border, fg = colAmber, colAmber
+		border, fg = th.Amber, th.Amber
 		// the answer keys must survive truncation, so the prompt yields to them
 		const glyph, answer = "▲ ", "   y / n"
 		budget := inner - 1 - runewidth.StringWidth(glyph) - runewidth.StringWidth(answer)
@@ -288,10 +281,10 @@ func (m Model) inputBox(w int) string {
 		}
 		content = glyph + prompt + answer
 	case m.mode == modeFilter:
-		border = colAccent
+		border = th.Accent
 		content = "> " + m.filter + "▌"
 	case m.filter == "":
-		fg = colDim
+		fg = th.Dim
 		content = "> press / to filter"
 	}
 	// Width is the content width, so the rendered block is inner+2 == w columns.
@@ -304,6 +297,7 @@ func (m Model) inputBox(w int) string {
 }
 
 func (m Model) keys(w int) string {
+	st := m.styles()
 	pairs := [][2]string{
 		{"↑↓", "move"}, {"/", "filter"}, {"x", "end"}, {"r", "restart"},
 		{"q", "quit"}, {"D", "dups"}, {"o", "open"}, {"c", "copy"}, {"a", "all"},
@@ -322,9 +316,9 @@ func (m Model) keys(w int) string {
 		if i == 0 {
 			b.WriteString(" ")
 		} else {
-			b.WriteString(styleDim.Render(" · "))
+			b.WriteString(st.dim.Render(" · "))
 		}
-		b.WriteString(styleHintKey.Render(p[0]) + " " + styleDim.Render(p[1]))
+		b.WriteString(st.hintKey.Render(p[0]) + " " + st.dim.Render(p[1]))
 		used += need
 	}
 	return b.String()
@@ -333,30 +327,33 @@ func (m Model) keys(w int) string {
 // busyLine is the spinner: one accent frame glyph plus a dim label and the
 // seconds the work has been running for.
 func (m Model) busyLine() string {
+	s := m.styles()
 	glyph := spinFrames[m.frame%len(spinFrames)]
 	rest := fmt.Sprintf(" %s… (%ds)", m.busy, int(m.busyFor.Seconds()))
-	return styleAccent.Render(glyph) + styleDim.Render(rest)
+	return s.accent.Render(glyph) + s.dim.Render(rest)
 }
 
 func (m Model) statusLine(w int) string {
 	if m.busy != "" && m.loaded {
 		return padTo(" "+m.busyLine(), w)
 	}
+	s := m.styles()
 	text := m.status
-	style := styleOK
+	style := s.ok
 	switch m.statusKind {
 	case statusError:
-		style = styleErr
+		style = s.err
 	case statusHint:
-		style = styleDim
+		style = s.dim
 	}
 	if text == "" && m.filter != "" {
-		text, style = "filter: "+m.filter+"  (esc clears)", styleDim
+		text, style = "filter: "+m.filter+"  (esc clears)", s.dim
 	}
 	return style.Render(fit(" "+text, w))
 }
 
-func box(title, foot string, lines []string, inner int) []string {
+func (m Model) box(title, foot string, lines []string, inner int) []string {
+	s := m.styles()
 	edge := func(left, h, label, right string) string {
 		if label != "" {
 			label = " " + truncate(label, inner-4) + " "
@@ -365,9 +362,9 @@ func box(title, foot string, lines []string, inner int) []string {
 		if fill < 0 {
 			fill = 0
 		}
-		return styleBorder.Render(left+h) + styleDim.Render(label) + styleBorder.Render(strings.Repeat(h, fill)+right)
+		return s.border.Render(left+h) + s.dim.Render(label) + s.border.Render(strings.Repeat(h, fill)+right)
 	}
-	left, right := styleBorder.Render(rounded.Left), styleBorder.Render(rounded.Right)
+	left, right := s.border.Render(rounded.Left), s.border.Render(rounded.Right)
 	out := []string{edge(rounded.TopLeft, rounded.Top, title, rounded.TopRight)}
 	for _, l := range lines {
 		out = append(out, left+l+right)
