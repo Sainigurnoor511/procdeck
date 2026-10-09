@@ -254,13 +254,19 @@ func TestViewLinesFitWidth(t *testing.T) {
 		// the suggestion rows are reserved in the layout budget, so command
 		// mode has to hold the exact-height contract on its own
 		states := map[string]Model{
-			"list":         base,
+			"list":      base,
+			"filtering": press(base, "f", "c", "e", "l"),
+			"filtered":  press(base, "f", "c", "e", "l", "enter"),
+			// an empty result still has to fill the table box
+			"filter-empty": press(base, "f", "z", "z", "z"),
+			"confirm":      press(base, "x"),
 			"cmd-empty":    press(base, "/"),
 			"cmd-matching": press(base, "/", "e", "n"),
 			"cmd-args":     press(base, "/", "e", "n", "d", "space", "c", "e", "l"),
 			// the panels replace the table area, so they carry the same
 			// contract on their own
-			"help": press(base, "/", "h", "e", "l", "p", "enter"),
+			"help":   press(base, "/", "h", "e", "l", "p", "enter"),
+			"doctor": withReport(base, fabricatedReport()),
 		}
 		for name, m := range states {
 			lines := strings.Split(m.View(), "\n")
