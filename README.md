@@ -184,7 +184,8 @@ your `PATH`. If it is not, add it:
     'User')
 ```
 
-From a clone, `.\build.ps1 -Install` does the same thing from the working tree:
+If your working tree has the local `build.ps1` helper (it is not part of the
+repository), `.\build.ps1 -Install` does the same thing from the working tree:
 it builds `.\bin\procdeck.exe`, runs `go install`, prints where the binary
 landed, and warns if that directory is not on `PATH`. Add `-Test` to gate the
 build on `go test ./...`, and `-NoRun` to stop it launching the TUI afterwards.

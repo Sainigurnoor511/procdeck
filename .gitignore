@@ -1,1 +1,5 @@
 *.exe
+bin/
+build.ps1
+.agents/
+.worktrees/
